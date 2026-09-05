@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.env
+mlruns/
+data/raw/
+data/canonical/
+data/tensors/
+data/labels/
+artifacts/
+*.pt
+*.ckpt
+*.parquet
