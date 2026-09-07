@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.scripts]
-market-image-prediction = "market_image_prediction:main"
+market-image-prediction = "market_image_prediction.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12.2,<0.13.0"]
@@ -44,3 +44,23 @@ dev = [
     "pytest-cov>=7.1.0",
     "ruff>=0.16.2",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "S", "DTZ", "BLE"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+include = ["src", "tests"]
+typeCheckingMode = "standard"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
