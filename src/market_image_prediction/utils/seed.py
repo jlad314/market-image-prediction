@@ -64,7 +64,7 @@ def provenance() -> dict[str, str | bool]:
         "git_sha": git_sha(),
         "git_dirty": git_is_dirty(),
     }
-    for name in ("torch", "yfinance", "polars", "pandas", "sklearn", "lightgbm"):
+    for name in ("torch", "yfinance", "polars", "pandas", "sklearn", "statsmodels"):
         try:
             env[name] = __import__(name).__version__
         except Exception:  # noqa: BLE001 - version reporting is best-effort

@@ -70,18 +70,42 @@ def add_forward_return(panel: pl.DataFrame, cfg: Config) -> pl.DataFrame:
 
 
 def cross_sectional_target(panel: pl.DataFrame, cfg: Config) -> pl.DataFrame:
-    """Attach the cross-sectional target the ranking model is trained against.
+    """Attach `target_cs`, the same-date ranking target the model is trained against.
 
-    Called after `add_forward_return`. Operates within each `date`, across the names
-    tradable on that date, and must add a `target_cs` column.
+    All three transforms are computed strictly within a `date`, so no information
+    crosses dates and the label stays as-of its own decision day.
+
+    The cross-section widens twice in this universe (XLRE in 2015, XLC in 2018). Every
+    transform below is therefore normalised by the number of names *observed on that
+    date*, never by a constant, so the target's scale does not step at those dates --
+    a discontinuity a model would otherwise happily learn as signal.
     """
-    # TODO(human): add the `target_cs` column, computed within each date.
-    #
-    # Available per row: date, ticker, target_return (null where the horizon runs off
-    # the end of the sample, and on dates before a ticker listed).
-    #
-    # Group with `.over("date")`. Nothing here may reference another date.
-    raise NotImplementedError("cross_sectional_target")
+    r = pl.col("target_return")
+    # Count only rows with an observed return: a ticker not yet listed, or one whose
+    # holding window runs off the end of the sample, is absent from the cross-section
+    # rather than being treated as a zero.
+    n_obs = r.count().over("date")
+
+    if cfg.labels.cross_sectional_transform == "rank":
+        # average ties -> [1, n]; rescaled to [-1, 1] by (n - 1) so the extremes are
+        # always exactly -1 and +1 regardless of how many names traded that day.
+        rank = r.rank(method="average").over("date")
+        target = pl.when(n_obs > 1).then(2.0 * (rank - 1.0) / (n_obs - 1.0) - 1.0).otherwise(None)
+    elif cfg.labels.cross_sectional_transform == "demean":
+        target = r - r.mean().over("date")
+    else:  # zscore
+        sd = r.std().over("date")
+        target = pl.when(sd > 0).then((r - r.mean().over("date")) / sd).otherwise(None)
+
+    return panel.with_columns(
+        n_obs.alias("cs_size"),
+        # A date too thin to rank produces a null target, not a degenerate one. These
+        # rows are kept so the manifest still records why they were unusable.
+        pl.when(n_obs >= cfg.labels.min_cross_section)
+        .then(target)
+        .otherwise(None)
+        .alias("target_cs"),
+    )
 
 
 def build_labels(panel: pl.DataFrame, cfg: Config) -> pl.DataFrame:

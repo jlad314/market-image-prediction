@@ -62,6 +62,24 @@ class FeatureConfig(BaseModel):
     # then mapped to [-1, 1]. Causal by construction: uses only the input window.
     mad_epsilon: float = 1e-8
     clip_sigma: float = 5.0
+    # How often a decision date is sampled. Adjacent daily windows share window-1 of
+    # their window days, so daily sampling multiplies storage and training time while
+    # adding almost no independent information. At 500 names the daily tensor is ~84 GB
+    # against ~17 GB weekly, and the backtest only trades weekly, so weekly sampling
+    # discards nothing that is ever used.
+    sample_frequency: Literal["daily", "weekly", "monthly"] = "daily"
+    # How an IV surface is scaled before the network sees it.
+    #
+    # "raw"        -- implied volatilities as supplied.
+    # "demean"     -- subtract each surface's own mean, leaving shape only.
+    # "standardise"-- demean then divide by the surface's own standard deviation.
+    #
+    # Level is the dominant direction of variance in any surface, so a network fed raw
+    # values finds it first and stops: the Phase 2 CNN ranked on volatility level
+    # (Spearman -0.40) and ignored skew entirely (-0.02). Removing the level forces the
+    # model to learn geometry -- skew, term structure, curvature -- which is the
+    # information the literature claims to use.
+    surface_normalisation: Literal["raw", "demean", "standardise"] = "raw"
 
     @field_validator("image_size")
     @classmethod
@@ -90,6 +108,19 @@ class LabelConfig(BaseModel):
     exit_price: Literal["open", "close"] = "close"
     price_field: Literal["adj_close", "close"] = "adj_close"
     volatility_scaled: bool = False
+    # How the forward return becomes a same-date ranking target.
+    #
+    # "rank" is the default because the cross-section is only 9-11 names wide. A z-score
+    # divides by a standard deviation estimated from 9 points, which is itself very
+    # noisy; demeaning keeps return units but lets one blown-up sector drag every other
+    # name's target. Ranking is outlier-robust and matches the Rank IC the backtest
+    # reports, at the cost of discarding magnitude -- so "demean" stays available for
+    # the ablation table, since it is the transform whose target is literally the P&L
+    # of an equal-weight market-neutral book.
+    cross_sectional_transform: Literal["rank", "demean", "zscore"] = "rank"
+    # Dates with fewer than this many observed returns yield a null target rather than
+    # a degenerate one-or-two-name "cross-section".
+    min_cross_section: int = Field(default=4, ge=2)
 
 
 class CleaningConfig(BaseModel):
@@ -143,8 +174,23 @@ class BacktestConfig(BaseModel):
     long_quantile: float = Field(default=0.25, gt=0, lt=0.5)
     short_quantile: float = Field(default=0.25, gt=0, lt=0.5)
     min_names_per_leg: int = 2
-    weighting: Literal["equal"] = "equal"
+    # "equal"  -- every name in a leg gets the same weight
+    # "rank"   -- weight proportional to distance from the cross-sectional median rank,
+    #             so the most extreme names carry the most capital
+    # "signal" -- weight proportional to the demeaned prediction itself
+    #
+    # Equal weighting across a wide quantile dilutes the extremes: with 125 names a side,
+    # the strongest and the 125th-strongest conviction get identical capital.
+    weighting: Literal["equal", "rank", "signal"] = "equal"
     sector_neutral: bool = False
+    # "flat" charges every name the same rate. "liquidity" scales each name's rate by the
+    # inverse square root of its dollar volume, normalised at the cross-sectional median,
+    # so `cost_bps` describes a typical name rather than all of them.
+    #
+    # This matters when the universe widens: adding smaller names raises breadth, which
+    # flatters Sharpe, while also raising the cost of trading. A flat model books the
+    # first effect and not the second.
+    cost_model: Literal["flat", "liquidity"] = "flat"
     cost_bps_grid: tuple[float, ...] = (0.0, 5.0, 10.0, 20.0, 50.0)
     baseline_cost_bps: float = 10.0
 

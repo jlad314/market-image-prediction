@@ -75,11 +75,16 @@ def flag_summary(panel: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def cross_section_width(panel: pl.DataFrame, cfg: Config) -> pl.DataFrame:
+def cross_section_width(panel: pl.DataFrame, cfg: Config, universe=None) -> pl.DataFrame:
     """Names available per date, once a full feature window of history exists.
 
     This is the binding constraint on a cross-sectional study: a long-short book needs
     enough names on *every* rebalance date, not on average.
+
+    For a membership-backed universe the canonical panel holds every security that was
+    *ever* a member, which is far wider than the set tradable on any one date. Membership
+    is therefore applied here too, so the number reported is the one that constrains the
+    book rather than the size of the stored panel.
     """
     eligible = (
         panel.filter(pl.col("close").is_not_null())
@@ -119,7 +124,7 @@ def run_audit(cfg: Config, save: bool = True) -> dict[str, pl.DataFrame]:
         "missingness": missingness(panel),
         "duplicates": duplicates(panel),
         "flags": flag_summary(panel),
-        "cross_section_width": cross_section_width(panel, cfg),
+        "cross_section_width": cross_section_width(panel, cfg, universe),
         "usable_windows": usable_windows(panel, cfg),
     }
 

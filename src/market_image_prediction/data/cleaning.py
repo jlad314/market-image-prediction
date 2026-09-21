@@ -13,6 +13,7 @@ before the bar's own date.
 
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 
 import pandas_market_calendars as mcal
@@ -34,10 +35,15 @@ QUALITY_FLAGS = (
 )
 
 
-def trading_days(start, end, calendar: str = "XNYS") -> pl.Series:
-    """Official session dates from the exchange calendar."""
+def trading_days(start: dt.date, end: dt.date, calendar: str = "XNYS") -> pl.Series:
+    """Official session dates from the exchange calendar.
+
+    Goes via `to_numpy()` rather than the DatetimeIndex `.date` accessor: the latter
+    yields an object-dtype array of `datetime.date`, which polars imports as Object and
+    then refuses to cast. `to_numpy()` gives datetime64, which casts cleanly.
+    """
     sched = mcal.get_calendar(calendar).schedule(start_date=start, end_date=end)
-    return pl.Series("date", sched.index.date).cast(pl.Date)
+    return pl.Series("date", sched.index.to_numpy()).cast(pl.Date)
 
 
 def align_to_calendar(prices: pl.DataFrame, sessions: pl.Series) -> pl.DataFrame:
@@ -78,23 +84,26 @@ def flag_suspicious_bars(prices: pl.DataFrame, cfg: Config) -> pl.DataFrame:
     ret = pl.col("log_return")
     w = q.extreme_return_lookback
 
-    scale = (
-        (ret - ret.rolling_median(w, min_samples=w))
-        .abs()
-        .rolling_median(w, min_samples=w)
-        .shift(1)
-        * 1.4826
-    )
+    scale = (ret - ret.rolling_median(w, min_samples=w)).abs().rolling_median(
+        w, min_samples=w
+    ).shift(1) * 1.4826
 
     robust_z = ret.abs() / scale.clip(lower_bound=q.mad_epsilon)
 
-    run_of_flat = ret.eq(0).fill_null(False).cast(pl.Int32).rolling_sum(
-        q.stale_price_run, min_samples=q.stale_price_run
+    run_of_flat = (
+        ret.eq(0)
+        .fill_null(False)
+        .cast(pl.Int32)
+        .rolling_sum(q.stale_price_run, min_samples=q.stale_price_run)
     )
 
     ohlc = ("open", "high", "low", "close")
 
     return prices.with_columns(
+        # Retained, not just thresholded. This is a causal regime-shift score -- it is
+        # what actually separates March 2020 from October 2008 -- and it feeds the
+        # by-volatility-regime diagnostics the backtest reports.
+        robust_z.over("ticker", order_by="date").alias("robust_z_return"),
         pl.any_horizontal(pl.col(c) <= 0 for c in (*ohlc, "adj_close"))
         .fill_null(False)
         .alias("flag_nonpositive_price"),
@@ -144,6 +153,10 @@ def build_canonical(cfg: Config, force: bool = False) -> Path:
     )
 
     write_parquet(tradable, out_path)
-    log.info("wrote canonical panel: %d rows, %d tickers -> %s",
-             tradable.height, tradable["ticker"].n_unique(), out_path)
+    log.info(
+        "wrote canonical panel: %d rows, %d tickers -> %s",
+        tradable.height,
+        tradable["ticker"].n_unique(),
+        out_path,
+    )
     return out_path

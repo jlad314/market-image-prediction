@@ -1,0 +1,69 @@
+universe: crsp_largecap
+seed: 17
+paths:
+  root: /Users/jaiman/Downloads/VSCode/market-image-prediction
+  raw: /Users/jaiman/Downloads/VSCode/market-image-prediction/data/raw
+  canonical: /Users/jaiman/Downloads/VSCode/market-image-prediction/data/canonical
+  tensors: /Users/jaiman/Downloads/VSCode/market-image-prediction/data/tensors
+  manifests: /Users/jaiman/Downloads/VSCode/market-image-prediction/data/manifests
+  predictions: /Users/jaiman/Downloads/VSCode/market-image-prediction/data/predictions
+  outputs: /Users/jaiman/Downloads/VSCode/market-image-prediction/outputs
+download:
+  source: yahoo
+  start: '1998-12-22'
+  end: '2026-01-01'
+  auto_adjust: false
+  max_retries: 4
+  retry_backoff_seconds: 2.0
+  allow_overwrite: false
+features:
+  window: 60
+  image_size: 32
+  channels:
+  - log_return
+  - log_volume_change
+  - realised_vol_20d
+  encodings:
+  - gasf
+  - gadf
+  realised_vol_lookback: 20
+  mad_epsilon: 1.0e-08
+  clip_sigma: 5.0
+  sample_frequency: monthly
+labels:
+  horizon: 21
+  execution_lag: 1
+  entry_price: open
+  exit_price: close
+  price_field: adj_close
+  volatility_scaled: false
+  cross_sectional_transform: rank
+  min_cross_section: 4
+cleaning:
+  extreme_return_abs: 0.25
+  extreme_return_sigma: 25.0
+  extreme_return_lookback: 60
+  mad_epsilon: 1.0e-08
+  stale_price_run: 3
+splits:
+  scheme: rolling_origin
+  train_years: 6
+  validate_years: 1
+  test_years: 1
+  step_years: 1
+  expanding: true
+  embargo_days: null
+backtest:
+  rebalance: weekly
+  long_quantile: 0.25
+  short_quantile: 0.25
+  min_names_per_leg: 2
+  weighting: equal
+  sector_neutral: false
+  cost_bps_grid:
+  - 0.0
+  - 5.0
+  - 10.0
+  - 20.0
+  - 50.0
+  baseline_cost_bps: 10.0

@@ -16,7 +16,9 @@ carries obvious survivorship and selection bias and must never back a headline c
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 BENCHMARK = "SPY"
 VIX = "^VIX"
@@ -97,12 +99,31 @@ MEGACAP_EQUITIES: tuple[str, ...] = (
 
 
 @dataclass(frozen=True)
+class MembershipInterval:
+    """One contiguous spell of index membership for one security.
+
+    Membership is not a single span: a company can leave the index and rejoin years
+    later, so a security is represented by a *list* of intervals rather than one
+    inception date.
+    """
+
+    identifier: str
+    start: dt.date
+    end: dt.date
+
+
+@dataclass(frozen=True)
 class Universe:
     name: str
     assets: tuple[Asset, ...]
     benchmark: str = BENCHMARK
     context: tuple[str, ...] = field(default_factory=lambda: (VIX, RISK_FREE))
     survivorship_bias_free: bool = False
+    # Populated for data-backed universes (CRSP). When present it, not `assets`,
+    # decides who is tradable on a given date.
+    membership: tuple[MembershipInterval, ...] = ()
+    # Where the panel is loaded from, for universes not sourced from Yahoo.
+    source: str = "yahoo"
 
     @property
     def tickers(self) -> tuple[str, ...]:
@@ -117,11 +138,19 @@ class Universe:
         return next((a.sector for a in self.assets if a.ticker == ticker), None)
 
     def active_on(self, date: dt.date) -> tuple[str, ...]:
-        """Tickers already trading on `date`.
+        """Securities eligible to be held on `date`.
 
-        This is a listing filter only. Sample eligibility additionally requires a full
+        For a data-backed universe this is genuine point-in-time index membership, so a
+        firm that was a member in 2005 and delisted in 2008 is present for 2005-2008 and
+        absent afterwards -- which is exactly what removes survivorship bias.
+
+        This is a membership filter only. Sample eligibility additionally requires a full
         feature window of history, which the sample builder enforces.
         """
+        if self.membership:
+            return tuple(
+                sorted({m.identifier for m in self.membership if m.start <= date <= m.end})
+            )
         return tuple(a.ticker for a in self.assets if a.inception <= date)
 
 
@@ -143,7 +172,59 @@ UNIVERSES: dict[str, Universe] = {
 }
 
 
+CRSP_MEMBERSHIP_PATH = Path("data") / "raw" / "wrds" / "crsp_largecap" / "membership.parquet"
+CRSP_TOPN_PATTERN = re.compile(r"^crsp_top(\d+)$")
+
+
+def crsp_snapshot_dir(universe_name: str) -> Path:
+    """Where a CRSP universe's raw snapshot lives.
+
+    `crsp_largecap` is the original top-500 pull. `crsp_topN` names a pull of a different
+    width and gets its own directory, so widening the universe never overwrites a
+    completed download or silently mixes two membership definitions.
+    """
+    if universe_name == "crsp_largecap":
+        return Path("data") / "raw" / "wrds" / "crsp_largecap"
+    return Path("data") / "raw" / "wrds" / universe_name
+
+
 def get_universe(name: str) -> Universe:
+    """Resolve a universe by name.
+
+    `crsp_largecap` is data-backed: its membership is a Parquet file produced by
+    `crsp-download`, so it is constructed lazily rather than being a module constant.
+    """
+    if name == "crsp_largecap" or CRSP_TOPN_PATTERN.match(name):
+        return load_crsp_universe(crsp_snapshot_dir(name) / "membership.parquet", name)
     if name not in UNIVERSES:
-        raise KeyError(f"unknown universe {name!r}; available: {sorted(UNIVERSES)}")
+        available = [*sorted(UNIVERSES), "crsp_largecap", "crsp_top<N>"]
+        raise KeyError(f"unknown universe {name!r}; available: {available}")
     return UNIVERSES[name]
+
+
+def load_crsp_universe(membership_path: Path, name: str = "crsp_largecap") -> Universe:
+    """Build a point-in-time large-cap universe from a saved CRSP membership table.
+
+    Membership comes from ranking every eligible US common stock by market cap at each
+    month-end and keeping the top N, so it reflects only information available on the
+    ranking date. Securities are keyed by PERMNO rather than ticker because tickers are
+    reused and reassigned between companies -- a ticker's history is not a firm's history.
+    """
+    import polars as pl
+
+    if not membership_path.exists():
+        raise FileNotFoundError(f"{membership_path} not found; run `crsp-download` first")
+    frame = pl.read_parquet(membership_path)
+    intervals = tuple(
+        MembershipInterval(identifier=str(r["permno"]), start=r["start"], end=r["ending"])
+        for r in frame.iter_rows(named=True)
+    )
+    return Universe(
+        name=name,
+        assets=(),
+        benchmark=BENCHMARK,
+        context=(),
+        survivorship_bias_free=True,
+        membership=intervals,
+        source="crsp",
+    )

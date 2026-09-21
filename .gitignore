@@ -1,15 +1,24 @@
+# Environment
 .venv/
+.env
 __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
-.env
+.DS_Store
+
+# Vendor data. CRSP and OptionMetrics are licensed for academic use and may not be
+# redistributed, so nothing under data/ is tracked. Derived summary statistics live in
+# results/ and are safe to publish.
+data/
+
+# Experiment artifacts, regenerable from the pipeline
+outputs/
 mlruns/
-data/raw/
-data/canonical/
-data/tensors/
-data/labels/
-artifacts/
 *.pt
 *.ckpt
 *.parquet
+*.npy
+
+# Working notes rather than part of the record
+project_plan.md
