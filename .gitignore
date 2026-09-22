@@ -22,3 +22,8 @@ mlruns/
 
 # Working notes rather than part of the record
 project_plan.md
+
+# Private working documents: the project brief and literature review.
+# Kept out of the public record; copies live outside the repo.
+claude-code-project-brief-*.md
+Neural Image Translation*.md
